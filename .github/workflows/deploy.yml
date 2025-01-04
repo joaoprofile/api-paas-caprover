@@ -1,0 +1,87 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Ensure required files exist
+        run: |
+          if [ ! -f captain-definition.json ]; then
+            echo "Error: captain-definition.json file not found!";
+            exit 1;
+          fi
+          if [ ! -f Dockerfile ]; then
+            echo "Error: Dockerfile file not found!";
+            exit 1;
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.22.5
+
+      - name: Install dependencies
+        run: go mod tidy
+
+      - name: Build the Go binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app_api cmd/main.go
+
+      - name: List files in workspace
+        run: ls -R
+
+      - name: Create tarball for CapRover
+        run: |
+          if [ ! -f app_api ]; then
+            echo "Error: app_api binary not found!";
+            exit 1;
+          fi
+          tar -cvf deploy.tar \
+            Dockerfile \
+            captain-definition.json \
+            app_api
+
+      - name: List files before deploy
+        run: ls -lh
+
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.CAPROVER_SERVER }}" ]; then
+            echo "Error: CAPROVER_SERVER is not set";
+            exit 1;
+          fi
+          if [ -z "${{ secrets.APP_NAME }}" ]; then
+            echo "Error: APP_NAME is not set";
+            exit 1;
+          fi
+          if [ -z "${{ secrets.APP_TOKEN }}" ]; then
+            echo "Error: APP_TOKEN is not set";
+            exit 1;
+          fi
+
+      - name: Debug CapRover Deploy Inputs
+        run: |
+          echo "Server: ${{ secrets.CAPROVER_SERVER }}"
+          echo "App: ${{ secrets.APP_NAME }}"
+          echo "Token: ${{ secrets.APP_TOKEN }}"
+          ls -lh deploy.tar
+
+      - name: Check Docker version
+        run: docker --version
+
+      - name: Deploy App to CapRover
+        uses: caprover/deploy-from-github@v1.0.1
+        with:
+          server: '${{ secrets.CAPROVER_SERVER }}'
+          app: '${{ secrets.APP_NAME }}'
+          token: '${{ secrets.APP_TOKEN }}'
